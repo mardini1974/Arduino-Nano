@@ -1,0 +1,283 @@
+/********************************************************************************
+Serial communications to arduino with a userspace component
+
+
+*********************************************************************************/
+
+component serialcon2                "This component services the arduino pendant";
+
+pin in float xposition              "Receives current position from Xpos";
+pin in float yposition              "Receives current position from Ypos";
+pin in float zposition              "Receives current position from Zpos";
+pin in bit   estopisactivated		"Recevies estop";
+pin in bit 	 miston					"Recevies mist";
+pin in bit 	 floodon					"Recevies flood";
+pin in bit   lubeon					"Recevies lube";
+pin in bit   machineon				"Recevies machine";
+pin in bit	 modemanual				"Recevies mode manual";
+pin in bit	 modemdi					"Recevies mode is midi";
+pin in bit	 programidle				"Recevies program is idle";
+pin in bit	 programpaused			"Recevies program is paused";
+pin in bit	 programrunning			"Recevies program is running";
+pin in bit	 spindlebrakeon			"Recevies spindle is  on brake";
+pin in bit	 spindlerunsbackward	"Recevies spindle is running reverse";
+pin in bit	 spindlerunsforward		"Recevies spindle is running forwward";
+pin out u32 sercommand				"sends serial commands";
+
+option singleton yes;               // makes no sense to have more than one of these components running
+option userspace yes;
+
+author "ArcEye arceyeATmgwareDOTcoDOTuk";
+license "GPL";
+;;
+
+#include <stdio.h>    /* Standard input/output definitions */
+#include <stdlib.h> 
+#include <stdint.h>   /* Standard types */
+#include <string.h>   /* String function definitions */
+#include <unistd.h>   /* UNIX standard function definitions */
+#include <fcntl.h>    /* File control definitions */
+#include <errno.h>    /* Error number definitions */
+#include <termios.h>  /* POSIX terminal control definitions */
+#include <sys/ioctl.h>
+
+#define BAUDRATE B115200
+
+    // IF THIS IS NOT THE DEVICE YOUR ARDUINO USES, CHANGE IT
+#define DEVICE "/dev/ttyUSB0"
+
+#define _POSIX_SOURCE 1 /* POSIX compliant source */
+
+    // predefs of later functions
+void sendCommand(char);
+int serialport_init();
+                             
+struct termios toptions;;       // port setup
+
+void user_mainloop(void)
+{
+char buffer[70];
+char ch;
+
+int fd = serialport_init();
+    
+    while(fd != -1)
+        {
+        usleep(100000);
+        FOR_ALL_INSTS()  
+            { 
+            bzero(buffer, 70); 
+            sprintf(buffer, "p:X%08.03fY%08.03fZ%08.03f%u%u%u%u%u%u%u%u%u%u%u%u%u", xposition, yposition, zposition,estopisactivated, miston, floodon, lubeon, machineon, modemanual, modemdi, programidle, programpaused, programrunning, spindlebrakeon, spindlerunsbackward, spindlerunsforward);
+            write(fd, buffer, sizeof(buffer));                                                  
+            
+            if(read(fd,&ch,1) == 1)  // if command byte read from arduino
+                sendCommand(ch);
+                sercommand =ch;
+            }           
+        }
+
+    close(fd);
+    exit(0);
+}
+
+//######################################################################
+
+int serialport_init()
+{
+int fd;
+ 
+    fd = open(DEVICE, O_RDWR | O_NOCTTY | O_NDELAY);
+    if (fd == -1)  
+        {
+        perror("init_serialport: Unable to open port ");
+        return -1;
+        }
+    
+    if (tcgetattr(fd, &toptions) < 0) 
+        {
+        perror("init_serialport: Couldn't get term attributes");
+        return -1;
+        }
+    speed_t brate = BAUDRATE; 
+    cfsetispeed(&toptions, brate);
+    cfsetospeed(&toptions, brate);
+    // 8N1
+    toptions.c_cflag &= ~PARENB;
+    toptions.c_cflag &= ~CSTOPB;
+    toptions.c_cflag &= ~CSIZE;
+    toptions.c_cflag |= CS8;
+    // no flow control
+    toptions.c_cflag &= ~CRTSCTS;
+
+    toptions.c_cflag |= CREAD | CLOCAL;  // turn on READ & ignore ctrl lines
+    toptions.c_iflag &= ~(IXON | IXOFF | IXANY); // turn off s/w flow ctrl
+
+    toptions.c_lflag &= ~(ICANON | ECHO | ECHOE | ISIG); // make raw
+    toptions.c_oflag &= ~OPOST; // make raw
+
+    // see: http://unixwiz.net/techtips/termios-vmin-vtime.html
+    toptions.c_cc[VMIN]  = 0;
+    toptions.c_cc[VTIME] = 20;
+    
+    if( tcsetattr(fd, TCSANOW, &toptions) < 0) 
+        {
+        perror("init_serialport: Couldn't set term attributes");
+        return -1;
+        }
+    return fd;
+}
+
+//###################################################################################
+
+    // want these to persist between calls
+char selected_axis = '0';
+int bJogging = false;
+int bJogOn = false;
+
+void sendCommand(char ch)
+{
+char cmdbuff[70];
+
+    switch(ch)
+        {
+      case 'E':
+                system("halcmd setp halui.estop.activate 1");
+                system("halcmd setp halui.estop.reset 0");
+                break;
+        case 'e':
+                system("halcmd setp halui.estop.reset 1"); 
+                system("halcmd setp halui.estop.activate 0");                                       
+                break;
+        case 'M':
+                system("halcmd setp halui.machine.on 1");  
+                system("halcmd setp halui.machine.off 0");                                      
+                break;
+        case 'm':
+                system("halcmd setp halui.machine.off 1"); 
+                system("halcmd setp halui.machine.on 0");                                                         
+                break;
+        case 'H':
+                system("halcmd setp halui.home-all 1");                                                         
+                break;
+        case 'C':
+                system("halcmd setp halui.mist.on 1");  
+                system("halcmd setp halui.mist.off 0");                                      
+                break;
+        case 'c':
+                system("halcmd setp halui.mist.off 1"); 
+                system("halcmd setp halui.mist.on 0");                                                         
+                break; 
+        case 'F':
+                system("halcmd setp halui.flood.on 1");  
+                system("halcmd setp halui.flood.off 0");                                      
+                break;
+        case 'f':
+                system("halcmd setp halui.flood.off 1"); 
+                system("halcmd setp halui.flood.on 0");                                                         
+                break;                        
+                                        
+        case '1':
+                system("halcmd setp gmoccapy.jog-inc-0 1"); 
+                system("halcmd setp gmoccapy.jog-inc-1 0"); 
+                system("halcmd setp gmoccapy.jog-inc-2 0"); 
+                system("halcmd setp gmoccapy.jog-inc-3 0"); 
+                system("halcmd setp gmoccapy.jog-inc-4 0"); 
+                system("halcmd setp gmoccapy.jog-inc-5 0"); 
+                break;                        
+        case '2':
+                system("halcmd setp gmoccapy.jog-inc-0 0"); 
+                system("halcmd setp gmoccapy.jog-inc-1 1"); 
+                system("halcmd setp gmoccapy.jog-inc-2 0"); 
+                system("halcmd setp gmoccapy.jog-inc-3 0"); 
+                system("halcmd setp gmoccapy.jog-inc-4 0"); 
+                system("halcmd setp gmoccapy.jog-inc-5 0"); 
+                break;                        
+        case '3':
+                system("halcmd setp gmoccapy.jog-inc-0 0"); 
+                system("halcmd setp gmoccapy.jog-inc-1 0"); 
+                system("halcmd setp gmoccapy.jog-inc-2 1"); 
+                system("halcmd setp gmoccapy.jog-inc-3 0"); 
+                system("halcmd setp gmoccapy.jog-inc-4 0"); 
+                system("halcmd setp gmoccapy.jog-inc-5 0"); 
+                break;                        
+         case '4':
+                system("halcmd setp gmoccapy.jog-inc-0 0"); 
+                system("halcmd setp gmoccapy.jog-inc-1 0"); 
+                system("halcmd setp gmoccapy.jog-inc-2 0"); 
+                system("halcmd setp gmoccapy.jog-inc-3 1"); 
+                system("halcmd setp gmoccapy.jog-inc-4 0"); 
+                system("halcmd setp gmoccapy.jog-inc-5 0"); 
+                break;                        
+        case '5':
+                system("halcmd setp gmoccapy.jog-inc-0 0"); 
+                system("halcmd setp gmoccapy.jog-inc-1 0"); 
+                system("halcmd setp gmoccapy.jog-inc-2 0"); 
+                system("halcmd setp gmoccapy.jog-inc-3 0"); 
+                system("halcmd setp gmoccapy.jog-inc-4 1"); 
+                system("halcmd setp gmoccapy.jog-inc-5 0"); 
+                break;                        
+        case '6':
+                system("halcmd setp gmoccapy.jog-inc-0 0"); 
+                system("halcmd setp gmoccapy.jog-inc-1 0"); 
+                system("halcmd setp gmoccapy.jog-inc-2 0"); 
+                system("halcmd setp gmoccapy.jog-inc-3 0"); 
+                system("halcmd setp gmoccapy.jog-inc-4 0"); 
+                system("halcmd setp gmoccapy.jog-inc-5 1"); 
+                break;                        
+       case 'S':
+                system("halcmd setp gmoccapy.jog-y-minus 1");                        
+                break;
+        case 's':
+                system("halcmd setp gmoccapy.jog-y-minus 0");                        
+                break;
+        case 'W':
+                system("halcmd setp gmoccapy.jog-y-plus 1");                        
+                break;
+        case 'w':
+                system("halcmd setp gmoccapy.jog-y-plus 0");                        
+                break;                         
+		case 'A':
+                system("halcmd setp gmoccapy.jog-x-minus 1");                        
+                break;
+        case 'a':
+                system("halcmd setp gmoccapy.jog-x-minus 0");                        
+                break;
+        case 'D':
+                system("halcmd setp gmoccapy.jog-x-plus 1");                        
+                break;
+        case 'd':
+                system("halcmd setp gmoccapy.jog-x-plus 0");                        
+                break;                         
+		case 'G':
+                system("halcmd setp gmoccapy.jog-z-minus 1");                        
+                break;
+        case 'g':
+                system("halcmd setp gmoccapy.jog-z-minus 0");                        
+                break;
+        case 'T':
+                system("halcmd setp gmoccapy.jog-z-plus 1");                        
+                break;
+        case 't':
+                system("halcmd setp gmoccapy.jog-z-plus 0");                        
+                break; 
+        case 'R':
+                system("halcmd setp gmoccapy.turtle-jog 0");                        
+                break;
+        case 'r':
+                system("halcmd setp gmoccapy.turtle-jog 1");                        
+                break;                        
+        case 'Q':
+                system("halcmd setp halui.spindle.start 1");                        
+                system("halcmd setp halui.spindle.stop 0");                        
+                break;
+        case 'q':
+                system("halcmd setp halui.spindle.start 0");                        
+                system("halcmd setp halui.spindle.stop 1");                        
+                break;    
+        default:
+                break;
+        }
+
+}
+
+
