@@ -67,7 +67,7 @@ int fd = serialport_init();
         FOR_ALL_INSTS()  
             { 
             bzero(buffer, 70); 
-            sprintf(buffer, "p:X%08.03fY%08.03fZ%08.03f%u%u%u%u%u%u%u%u%u%u%u%u%u", xposition, yposition, zposition,estopisactivated, miston, floodon, lubeon, machineon, modemanual, modemdi, programidle, programpaused, programrunning, spindlebrakeon, spindlerunsbackward, spindlerunsforward);
+            sprintf(buffer, "p:X%08.03fY%08.03fZ%08.03f", xposition, yposition, zposition);
             write(fd, buffer, sizeof(buffer));                                                  
             
             if(read(fd,&ch,1) == 1)  // if command byte read from arduino
