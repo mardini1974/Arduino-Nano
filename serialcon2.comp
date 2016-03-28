@@ -56,20 +56,23 @@ struct termios toptions;;       // port setup
 
 void user_mainloop(void)
 {
-char buffer[70];
+char buffer[50];
 char ch;
 
 int fd = serialport_init();
     
     while(fd != -1)
         {
-        usleep(100000);
+        usleep(1000000);
         FOR_ALL_INSTS()  
             { 
-            bzero(buffer, 70); 
-            sprintf(buffer, "p:X%08.03fY%08.03fZ%08.03f", xposition, yposition, zposition);
+				//xposition=111.0;
+				//yposition=222.0;
+				//zposition=333.3;
+            bzero(buffer, 50); 
+            sprintf(buffer, "X%07.03fY%07.03fZ%07.03f", xposition, yposition, zposition);
             write(fd, buffer, sizeof(buffer));                                                  
-            
+
             if(read(fd,&ch,1) == 1)  // if command byte read from arduino
                 sendCommand(ch);
                 sercommand =ch;
@@ -136,7 +139,7 @@ int bJogOn = false;
 
 void sendCommand(char ch)
 {
-char cmdbuff[70];
+char cmdbuff[50];
 
     switch(ch)
         {
@@ -279,5 +282,4 @@ char cmdbuff[70];
         }
 
 }
-
 
